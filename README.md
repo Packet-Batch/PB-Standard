@@ -7,7 +7,7 @@ While this version isn't as fast as the AF_XDP or DPDK versions, having cooked s
 A lot of this code is based off of my Packet Sequence project [here](https://github.com/gamemann/Packet-Sequence).
 
 ## Configuration
-Configuration for this project may be found in the Packet Batch Common [repository](https://github.com/Packet-Batch/PB-Common) including YAML configs and command line support. With that said, you may also check out the Patch Batch Tests [repository](https://github.com/Packet-Batch/PB-Tests) for examples.
+Configuration for this project may be found in the Packet Batch Common [repository](https://github.com/Packet-Batch/PB-Common) including YAML configs and command line support. With that said, you may also check out the Packet Batch Tests [repository](https://github.com/Packet-Batch/PB-Tests) for examples.
 
 ## Building And Installing
 Building and installing this project is fairly easy. It includes building the Packet Batch Common repository which requires [libyaml](https://github.com/yaml/libyaml). As long as you use the `--recursive` flag with `git`, it should retrieve all of the required submodules automatically located in the `modules/` directory. Otherwise, you will need to go into the Common repository and execute the `git submodule update --init` command. We use `make` to build and install the application.
