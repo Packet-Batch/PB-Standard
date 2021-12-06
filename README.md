@@ -1,4 +1,6 @@
 # Packet Batch (Standard)
+[![Packet Batch Standard Build Workflow](https://github.com/Packet-Batch/PB-Standard/actions/workflows/build.yml/badge.svg)](https://github.com/Packet-Batch/PB-Standard/actions/workflows/build.yml) [![Packet Batch Standard Run Workflow](https://github.com/Packet-Batch/PB-Standard/actions/workflows/run.yml/badge.svg)](https://github.com/Packet-Batch/PB-Standard/actions/workflows/run.yml)
+
 ## Description
 This is the standard Packet Batch application that utilizes `AF_PACKETv3` Linux sockets. Due to `AF_PACKETv3` Linux sockets support, you are able to use cooked TCP sockets with this version which makes it easier to establish a TCP connection (the three-way handshake).
 
