@@ -27,27 +27,23 @@ GLOBAL_FLAGS := -O2
 MAIN_FLAGS := -pthread -lyaml
 
 # Chains.
-all: mk_build common sequence main
+all: mk_build sequence main
 
 # Creates the build directory if it doesn't already exist.
 mk_build:
 	mkdir -p $(BUILD_DIR)
-
-# Build and install the Packet Batch common submodule (this includes libyaml).
-common:
-	$(MAKE) -C $(COMMON_DIR)/
-	$(MAKE) -C $(COMMON_DIR)/ install
 
 # The sequence file.
 sequence: mk_build
 	$(CC) -I $(COMMON_SRC_DIR) $(GLOBAL_FLAGS) -c -o $(BUILD_DIR)/$(SEQ_OUT) $(SRC_DIR)/$(SEQ_SRC)
 
 # The main program.
-main: mk_build common $(COMMON_OBJS)
+main: mk_build sequence $(COMMON_OBJS)
 	$(CC) -I $(COMMON_SRC_DIR) $(GLOBAL_FLAGS) $(MAIN_FLAGS) -o $(BUILD_DIR)/$(MAIN_OUT) $(COMMON_OBJS) $(BUILD_DIR)/$(SEQ_OUT) $(SRC_DIR)/$(MAIN_SRC)
 
 # Cleanup (remove build files).
 clean:
+	$(MAKE) -C $(COMMON_DIR)/ clean
 	rm -f $(BUILD_DIR)/*.o
 	rm -f $(BUILD_DIR)/$(MAIN_OUT)
 
