@@ -476,6 +476,23 @@ void *thread_hdl(void *temp)
     tcpsin.sin_port = htons(ti->seq.tcp.dst_port);
     memset(&tcpsin.sin_zero, 0, sizeof(tcpsin.sin_zero));
 
+    // If we're using one connection for a cooked socket, open and connect socket now.
+    if (ti->seq.tcp.use_socket && ti->seq.tcp.one_connection) {
+        if ((sock_fd = socket(sock_domain, sock_type, sock_proto)) < 0)
+        {
+            fprintf(stderr, "ERROR - Cannot setup TCP cook socket :: %s.\n", strerror(errno));
+
+            pthread_exit(NULL);
+        }
+
+        if (connect(sock_fd, (struct sockaddr *)&tcpsin, sizeof(tcpsin)) != 0)
+        {
+            fprintf(stderr, "ERROR - Cannot connect to destination using cooked sockets :: %s.\n", strerror(errno));
+
+            pthread_exit(NULL);
+        }
+    }
+
     // Loop.
     while (1)
     {
@@ -621,7 +638,7 @@ void *thread_hdl(void *temp)
                 tcph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, (tcph->doff * 4) + data_len, IPPROTO_TCP, csum_partial(tcph, (tcph->doff * 4) + data_len, 0));   
             }
 
-            if (ti->seq.tcp.use_socket)
+            if (ti->seq.tcp.use_socket && !ti->seq.tcp.one_connection)
             {
                 if ((sock_fd = socket(sock_domain, sock_type, sock_proto)) < 0)
                 {
