@@ -496,149 +496,153 @@ void *thread_hdl(void *temp)
     // Loop.
     while (1)
     {
-        // Increase count and check.
-        if (ti->seq.count > 0 || ti->seq.track_count)
-        {
-            if (ti->seq.count > 0 && count[ti->seq_cnt] >= ti->seq.count)
-            {
-                break;
-            }
-
-            __sync_add_and_fetch(&count[ti->seq_cnt], 1);
-        }
-
-        // Check time.
-        if (ti->seq.time > 0 && time(NULL) >= end)
-        {
-            break;
-        }
-
+        // Retrieve seed.
         seed = time(NULL) ^ count[ti->seq_cnt];
 
-        /* Assign random IP header values if need to be. */
-
-        // Check for random TTL.
-        if (ti->seq.ip.min_ttl != ti->seq.ip.max_ttl)
+        // Check for cooked socket.
+        if (!ti->seq.tcp.use_socket)
         {
-            iph->ttl = rand_num(ti->seq.ip.min_ttl, ti->seq.ip.max_ttl, seed);
-        }
+            /* Assign random IP header values if need be. */
 
-        // Check for random ID.
-        if (ti->seq.ip.min_id != ti->seq.ip.max_id)
-        {
-            iph->id = htons(rand_num(ti->seq.ip.min_id, ti->seq.ip.max_id, seed));
-        }
-
-        // Check if source IP is defined. If not, get a random IP from the ranges and assign it to the IP header's source IP.
-        if (ti->seq.ip.src_ip == NULL && !ti->seq.tcp.use_socket)
-        {
-            // Check if there are ranges.
-            if (ti->seq.ip.range_count > 0)
+            // Check for random TTL.
+            if (ti->seq.ip.min_ttl != ti->seq.ip.max_ttl)
             {
-                __u16 ran = rand_num(0, (ti->seq.ip.range_count - 1), seed);
+                iph->ttl = rand_num(ti->seq.ip.min_ttl, ti->seq.ip.max_ttl, seed);
+            }
 
-                // Ensure this range is valid.
-                if (ti->seq.ip.ranges[ran] != NULL)
+            // Check for random ID.
+            if (ti->seq.ip.min_id != ti->seq.ip.max_id)
+            {
+                iph->id = htons(rand_num(ti->seq.ip.min_id, ti->seq.ip.max_id, seed));
+            }
+
+            // Check if source IP is defined. If not, get a random IP from the ranges and assign it to the IP header's source IP.
+            if (ti->seq.ip.src_ip == NULL && !ti->seq.tcp.use_socket)
+            {
+                // Check if there are ranges.
+                if (ti->seq.ip.range_count > 0)
                 {
-                    if (ti->seq.count < 1 && !ti->seq.track_count)
-                    {
-                        count[ti->seq_cnt]++;
-                    }
-    
-                    char *randip = rand_ip(ti->seq.ip.ranges[ran], &count[ti->seq_cnt]);
+                    __u16 ran = rand_num(0, (ti->seq.ip.range_count - 1), seed);
 
-                    if (randip != NULL)
+                    // Ensure this range is valid.
+                    if (ti->seq.ip.ranges[ran] != NULL)
                     {
-                        strcpy(s_ip, randip);
+                        if (ti->seq.count < 1 && !ti->seq.track_count)
+                        {
+                            count[ti->seq_cnt]++;
+                        }
+        
+                        char *randip = rand_ip(ti->seq.ip.ranges[ran], &count[ti->seq_cnt]);
+
+                        if (randip != NULL)
+                        {
+                            strcpy(s_ip, randip);
+                        }
+                        else
+                        {
+                            goto fail;
+                        }
                     }
                     else
                     {
-                        goto fail;
+                        fail:
+                        fprintf(stderr, "ERROR - Source range count is above 0, but string is NULL. Please report this! Using localhost...\n");
+
+                        strcpy(s_ip, "127.0.0.1");
                     }
                 }
                 else
                 {
-                    fail:
-                    fprintf(stderr, "ERROR - Source range count is above 0, but string is NULL. Please report this! Using localhost...\n");
+                    // This shouldn't happen, but since it did, just assign localhost and warn the user.
+                    fprintf(stdout, "WARNING - No source IP or source range(s) specified. Using localhost...\n");
 
                     strcpy(s_ip, "127.0.0.1");
                 }
+
+                // Copy 32-bit IP address to IP header in network byte order.
+                struct in_addr s_addr;
+                inet_aton(s_ip, &s_addr);
+
+                iph->saddr = s_addr.s_addr;
             }
-            else
+
+            // Check layer-4 protocols and assign random characteristics if need to be.
+            if (protocol == IPPROTO_UDP)
             {
-                // This shouldn't happen, but since it did, just assign localhost and warn the user.
-                fprintf(stdout, "WARNING - No source IP or source range(s) specified. Using localhost...\n");
+                // Check for random source port.
+                if (ti->seq.udp.src_port == 0)
+                {
+                    udph->source = htons(rand_num(1, 65535, seed));
+                }
 
-                strcpy(s_ip, "127.0.0.1");
+                // Check for random destination port.
+                if (ti->seq.udp.dst_port == 0)
+                {
+                    udph->dest = htons(rand_num(1, 65535, seed));
+                }
+
+                // Check for UDP length recalculation.
+                if (need_len_recal)
+                {
+                    udph->len = htons(l4_len + data_len);
+                }
+
+                // Check for UDP checksum recalculation.
+                if (need_l4_csum && ti->seq.l4_csum)
+                {
+                    udph->check = 0;
+                    udph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, sizeof(struct udphdr) + data_len, IPPROTO_UDP, csum_partial(udph, sizeof(struct udphdr) + data_len, 0));   
+                }
             }
-
-            // Copy 32-bit IP address to IP header in network byte order.
-            struct in_addr s_addr;
-            inet_aton(s_ip, &s_addr);
-
-            iph->saddr = s_addr.s_addr;
-        }
-        
-        // Check if we need to calculate random payload.
-        if (exact_pl_len < 1 && !ti->seq.pl.is_static)
-        {
-            data_len = rand_num(ti->seq.pl.min_len, ti->seq.pl.max_len, seed);
-
-            // Fill out payload with random characters.
-            for (__u16 i = 0; i < data_len; i++)
+            else if (protocol == IPPROTO_TCP)
             {
-                *(data + i) = rand_r(&seed);
-            }
-        }
+                if (!ti->seq.tcp.use_socket)
+                {
+                    if (ti->seq.tcp.src_port == 0)
+                    {
+                        tcph->source = htons(rand_num(1, 65535, seed));
+                    }
 
-        // Check layer-4 protocols and assign random characteristics if need to be.
-        if (protocol == IPPROTO_UDP)
-        {
-            // Check for random source port.
-            if (ti->seq.udp.src_port == 0)
+                    if (ti->seq.tcp.dst_port == 0)
+                    {
+                        tcph->dest = htons(rand_num(1, 65535, seed));
+                    }
+
+                    // Check if we need to calculate checksum.
+                    if (need_l4_csum && ti->seq.l4_csum)
+                    {
+                        tcph->check = 0;
+                        tcph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, (tcph->doff * 4) + data_len, IPPROTO_TCP, csum_partial(tcph, (tcph->doff * 4) + data_len, 0));   
+                    }
+                } 
+            }
+            else if (protocol == IPPROTO_ICMP)
             {
-                udph->source = htons(rand_num(1, 65535, seed));
+                if (need_l4_csum && ti->seq.l4_csum)
+                {
+                    icmph->checksum = 0;
+                    icmph->checksum = icmp_csum((__u16 *)icmph, l4_len + data_len);
+                }
             }
-
-            // Check for random destination port.
-            if (ti->seq.udp.dst_port == 0)
-            {
-                udph->dest = htons(rand_num(1, 65535, seed));
-            }
-
-            // Check for UDP length recalculation.
+            
+            // Check for length recalculation for IP header.
             if (need_len_recal)
             {
-                udph->len = htons(l4_len + data_len);
+                iph->tot_len = htons((iph->ihl * 4) + l4_len + data_len);
             }
 
-            // Check for UDP checksum recalculation.
-            if (need_l4_csum && ti->seq.l4_csum)
+            // Check if we need to calculate IP checksum.
+            if (need_csum && ti->seq.ip.csum)
             {
-                udph->check = 0;
-                udph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, sizeof(struct udphdr) + data_len, IPPROTO_UDP, csum_partial(udph, sizeof(struct udphdr) + data_len, 0));   
+                update_iph_checksum(iph);
             }
         }
-        else if (protocol == IPPROTO_TCP)
+        else
         {
-            if (ti->seq.tcp.src_port == 0)
-            {
-                tcph->source = htons(rand_num(1, 65535, seed));
-            }
+            /* Handle cooked sockets */
 
-            if (ti->seq.tcp.dst_port == 0)
-            {
-                tcph->dest = htons(rand_num(1, 65535, seed));
-            }
-
-            // Check if we need to calculate checksum.
-            if (need_l4_csum && ti->seq.l4_csum)
-            {
-                tcph->check = 0;
-                tcph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, (tcph->doff * 4) + data_len, IPPROTO_TCP, csum_partial(tcph, (tcph->doff * 4) + data_len, 0));   
-            }
-
-            if (ti->seq.tcp.use_socket && !ti->seq.tcp.one_connection)
+            // Check if we need to perform a new connection.
+            if (!ti->seq.tcp.one_connection)
             {
                 if ((sock_fd = socket(sock_domain, sock_type, sock_proto)) < 0)
                 {
@@ -655,31 +659,23 @@ void *thread_hdl(void *temp)
                 }
             }
         }
-        else if (protocol == IPPROTO_ICMP)
-        {
-            if (need_l4_csum && ti->seq.l4_csum)
-            {
-                icmph->checksum = 0;
-                icmph->checksum = icmp_csum((__u16 *)icmph, l4_len + data_len);
-            }
-        }
         
-        // Check for length recalculation for IP header.
-        if (need_len_recal)
+        // Check if we need to calculate random payload.
+        if (exact_pl_len < 1 && !ti->seq.pl.is_static)
         {
-            iph->tot_len = htons((iph->ihl * 4) + l4_len + data_len);
-        }
+            data_len = rand_num(ti->seq.pl.min_len, ti->seq.pl.max_len, seed);
 
-        // Check if we need to calculate IP checksum.
-        if (need_csum && ti->seq.ip.csum)
-        {
-            update_iph_checksum(iph);
+            // Fill out payload with random characters.
+            for (__u16 i = 0; i < data_len; i++)
+            {
+                *(data + i) = rand_r(&seed);
+            }
         }
 
         __u16 sent;
 
         // Attempt to send packet.
-        if (protocol == IPPROTO_TCP && ti->seq.tcp.use_socket)
+        if (ti->seq.tcp.use_socket)
         {
             if ((sent = send(sock_fd, data, data_len, 0)) < 0)
             {
@@ -697,25 +693,49 @@ void *thread_hdl(void *temp)
         // Check if we want to send verbose output or not.
         if (ti->cmd.verbose && sent > 0)
         {
-            // Retrieve source and destination ports for UDP/TCP protocols.
-            __u16 srcport = 0;
-            __u16 dstport = 0;
-
-            if (protocol == IPPROTO_UDP)
+            if (!ti->seq.tcp.use_socket)
             {
-                srcport = ntohs(udph->source);
-                dstport = ntohs(udph->dest);
-            }
-            else if (protocol == IPPROTO_TCP)
-            {
-                srcport = ntohs(tcph->source);
-                dstport = ntohs(tcph->dest);
-            }
+                // Retrieve source and destination ports for UDP/TCP protocols.
+                __u16 srcport = 0;
+                __u16 dstport = 0;
 
-            fprintf(stdout, "Sent %d bytes of data from %s:%d to %s:%d.\n", sent, (ti->seq.ip.src_ip != NULL) ? ti->seq.ip.src_ip : s_ip, srcport, ti->seq.ip.dst_ip, dstport);
+                if (protocol == IPPROTO_UDP)
+                {
+                    srcport = ntohs(udph->source);
+                    dstport = ntohs(udph->dest);
+                }
+                else if (protocol == IPPROTO_TCP)
+                {
+                    srcport = ntohs(tcph->source);
+                    dstport = ntohs(tcph->dest);
+                }
+
+                fprintf(stdout, "Sent %d bytes of data from %s:%d to %s:%d.\n", sent, (ti->seq.ip.src_ip != NULL) ? ti->seq.ip.src_ip : s_ip, srcport, ti->seq.ip.dst_ip, dstport);
+            }
+            else
+            {
+                fprintf(stdout, "Sent %d bytes of data to %s:%d under cooked socket.\n", sent, ti->seq.ip.dst_ip, ti->seq.tcp.dst_port);
+            }
         }
 
-        // Check data.
+        // Close TCP if we're creating a new one later.
+        if (ti->seq.tcp.use_socket && !ti->seq.tcp.one_connection)
+        {
+            close(sock_fd);
+        }
+
+        // Increase packet count and check if we've exceeded.
+        if (ti->seq.count > 0 || ti->seq.track_count)
+        {
+            if (ti->seq.count > 0 && count[ti->seq_cnt] >= ti->seq.count)
+            {
+                break;
+            }
+
+            __sync_add_and_fetch(&count[ti->seq_cnt], 1);
+        }
+
+        // Check max data.
         if (ti->seq.max_data > 0)
         {
             if (total_data[ti->seq_cnt] >= ti->seq.max_data)
@@ -726,13 +746,13 @@ void *thread_hdl(void *temp)
             __sync_add_and_fetch(&total_data[ti->seq_cnt], ntohs(iph->tot_len) + sizeof(struct ethhdr));
         }
 
-        // Close TCP socket if enabled.
-        if (ti->seq.tcp.use_socket)
+        // Check time.
+        if (ti->seq.time > 0 && time(NULL) >= end)
         {
-            close(sock_fd);
+            break;
         }
 
-        // Check for delay.
+        // Finally, check for delay.
         if (ti->seq.delay > 0)
         {
             usleep(ti->seq.delay);
@@ -740,7 +760,7 @@ void *thread_hdl(void *temp)
     }
 
     // Close socket.
-    if (!ti->seq.tcp.use_socket)
+    if (!ti->seq.tcp.use_socket || ti->seq.tcp.one_connection)
     {
         close(sock_fd);
     }
