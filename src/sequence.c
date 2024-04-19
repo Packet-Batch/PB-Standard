@@ -485,7 +485,7 @@ void *thread_hdl(void *temp)
             pthread_exit(NULL);
         }
 
-        if (connect(sock_fd, (struct sockaddr *)&tcpsin, sizeof(tcpsin)) != 0)
+        if (connect(sock_fd, (struct sockaddr *)&tcpsin, sizeof(tcpsin)) < 0)
         {
             fprintf(stderr, "ERROR - Cannot connect to destination using cooked sockets :: %s.\n", strerror(errno));
 
@@ -677,16 +677,20 @@ void *thread_hdl(void *temp)
         // Attempt to send packet.
         if (ti->seq.tcp.use_socket)
         {
-            if ((sent = send(sock_fd, data, data_len, 0)) < 0)
+            if ((sent = send(sock_fd, data, data_len, MSG_NOSIGNAL)) < 0)
             {
                 fprintf(stderr, "ERROR - Could not send TCP (cooked) packet with length %hu :: %s.\n", (ntohs(iph->tot_len)), strerror(errno));
+
+                pthread_exit(NULL);
             }
         }
         else
         {
-            if ((sent = send(sock_fd, buffer, ntohs(iph->tot_len) + sizeof(struct ethhdr), 0)) < 0)
+            if ((sent = send(sock_fd, buffer, ntohs(iph->tot_len) + sizeof(struct ethhdr), MSG_NOSIGNAL)) < 0)
             {
                 fprintf(stderr, "ERROR - Could not send packet with length %lu :: %s.\n", (ntohs(iph->tot_len) + sizeof(struct ethhdr)), strerror(errno));
+
+                pthread_exit(NULL);
             }
         }
 
